@@ -107,8 +107,8 @@ if length(worker_ids)>jellyfish_threads
 else
 	workers_to_use = worker_ids;
 end
-pmap2(x->run(`$(jellyfish_binary) count $(full_file_names[x]) -m 30 -t 1 -s 100M --disk -C -o $(output_folder)/Counts/$(file_names[x])-30mers.jf`),[1:num_files],workers_to_use);
-pmap2(x->run(`$(jellyfish_binary) count $(full_file_names[x]) -m 50 -t 1 -s 100M --disk -C -o $(output_folder)/Counts/$(file_names[x])-50mers.jf`),[1:num_files],workers_to_use);
+pmap2(x->run(`$(jellyfish_binary) count $(full_file_names[x]) -m 30 -t 1 -s 100M --disk -C -o $(output_folder)/Counts/$(file_names[x])-30mers.jf`),collect(1:num_files),workers_to_use);
+pmap2(x->run(`$(jellyfish_binary) count $(full_file_names[x]) -m 50 -t 1 -s 100M --disk -C -o $(output_folder)/Counts/$(file_names[x])-50mers.jf`),collect(1:num_files),workers_to_use);
 
 #Temporary function that performs the parallelization
 function to_run(index_list,CommonKmersMatrix,kmer_size)
@@ -127,7 +127,7 @@ function to_run(index_list,CommonKmersMatrix,kmer_size)
 						if idx > n
 							break
 						end
-						(CommonKmersMatrix[index_list[idx,1],index_list[idx,2]],CommonKmersMatrix[index_list[idx,2],index_list[idx,1]]) = remotecall_fetch(p, (x,y)->int64(split(readall(`$(count_in_file_binary) $(output_folder)/Counts/$(file_names[x])-$(kmer_size)mers.jf $(output_folder)/Counts/$(file_names[y])-$(kmer_size)mers.jf`))), index_list[idx,1],index_list[idx,2])
+						(CommonKmersMatrix[index_list[idx,1],index_list[idx,2]],CommonKmersMatrix[index_list[idx,2],index_list[idx,1]]) = remotecall_fetch(p, (x,y)->Int64[parse(Int64,s) for s = split(readall(`$(count_in_file_binary) $(output_folder)/Counts/$(file_names[x])-$(kmer_size)mers.jf $(output_folder)/Counts/$(file_names[y])-$(kmer_size)mers.jf`))], index_list[idx,1],index_list[idx,2])
 					end
 				end
 			end
@@ -182,14 +182,14 @@ end
 	end
 	mkdir("$(ram_disk_location)/$(input_file)")
 	#Make .dot file
-	run(`$(jellyfish_binary) dump $(counts_directory)/$(input_file)-30mers.jf -c -t` |> `cut -f 1` |> `tr '[:upper:]' '[:lower:]'` |> `sed 's/$/;/g'` |> "$(ram_disk_location)/$(input_file)/$(input_file)-30mers.dot")
+	run(pipeline(pipeline(pipeline(pipeline(`$(jellyfish_binary) dump $(counts_directory)/$(input_file)-30mers.jf -c -t` , `cut -f 1`) , `tr '[:upper:]' '[:lower:]'`) , `sed 's/$/;/g'`) , "$(ram_disk_location)/$(input_file)/$(input_file)-30mers.dot"))
 	#Run Bcalm
 	working_dir = pwd();
 	cd("$(ram_disk_location)/$(input_file)")
 	temp=readall(`$(bcalm_binary) $(input_file)-30mers.dot $(input_file)-30mers.bcalm 5`);
 	#Move the file and delete the temp directory
 	cd(working_dir)
-	run(`cat $(ram_disk_location)/$(input_file)/$(input_file)-30mers.bcalm` |> `sed 's/;//g'` |> `tr '[:lower:]' '[:upper:]'` |> `sed 's/^/>seq\n/g'` |> "$(output_folder)/$(input_file)-30mers.bcalm.fa")
+	run(pipeline(pipeline(pipeline(pipeline(`cat $(ram_disk_location)/$(input_file)/$(input_file)-30mers.bcalm` , `sed 's/;//g'`) , `tr '[:lower:]' '[:upper:]'`) , `sed 's/^/>seq\n/g'`) , "$(output_folder)/$(input_file)-30mers.bcalm.fa"))
 	rm("$(ram_disk_location)/$(input_file)",recursive=true)
 end
 
@@ -199,7 +199,7 @@ if isdir("$(output_folder)/Bcalms")
 	rm("$(output_folder)/Bcalms",recursive=true)
 end
 mkdir("$(output_folder)/Bcalms")
-pmap(x->formBcalm(file_names[x], "$(output_folder)/Bcalms", bcalm_binary, ram_disk_location, jellyfish_binary, counts_directory),[1:num_files]);
+pmap(x->formBcalm(file_names[x], "$(output_folder)/Bcalms", bcalm_binary, ram_disk_location, jellyfish_binary, counts_directory),collect(1:num_files));
 
 #Remove Kmer counts
 rm("$(output_folder)/Counts", recursive=true)

@@ -96,7 +96,7 @@ function lsqnonneg(C::Matrix, d::Vector, tol::Real=-1, itmax_factor::Real=3, Cha
 				return x
 			end
 		end
-		xold = [x];
+		xold = collect(x);
 		x = z;
 
         dtemp=d[:];
@@ -138,7 +138,7 @@ end
 fid = open(input_file,"r")
 input = readlines(fid)
 close(fid)
-input = map(x->float(strip(x)), input)
+input = map(x->parse(Float64,strip(x)), input)
 
 #Next, read in the taxonomy file
 fid = open(taxonomy_file,"r")
@@ -433,10 +433,10 @@ close(fid);
 
 if re_run & isfile("$(dirname(output_file))/$(basename(input_file_name))-y30.txt") & isfile("$(dirname(output_file))/$(basename(input_file_name))-y50.txt")
 	fid = open("$(dirname(output_file))/$(basename(input_file_name))-y30.txt","r")
-	y30 = float(split(readall(fid)));
+        y30 = parse(Float64,split(readall(fid)));
 	close(fid)
 	fid = open("$(dirname(output_file))/$(basename(input_file_name))-y50.txt","r")
-	y50 = float(split(readall(fid)));
+	y50 = parse(Float64,split(readall(fid)));
 	close(fid)
 else
 	#form the jf files
@@ -444,12 +444,12 @@ else
 	run(`$(jellyfish_binary) count $(input_file_name) -m 50 -t $(num_threads) -s 100M -C -Q $(quality) -o $(basename(input_file_name))-50mers.jf`);
 	#do it once to read the jf and bcalms into memory
 	temp=readall(`$(query_per_sequence_binary) $(basename(input_file_name))-30mers.jf $(data_dir)/Bcalms/$(file_names[1])-30mers.bcalm.fa`);
-	Y30 = pmap(x->int(readall(`$(query_per_sequence_binary) $(basename(input_file_name))-30mers.jf $(data_dir)/Bcalms/$(file_names[x])-30mers.bcalm.fa`)),[1:num_files]);
+        Y30 = pmap(x->parse(Int,readall(`$(query_per_sequence_binary) $(basename(input_file_name))-30mers.jf $(data_dir)/Bcalms/$(file_names[x])-30mers.bcalm.fa`)),collect(1:num_files));
 	#now for the 50mers
 	temp=readall(`$(query_per_sequence_binary) $(basename(input_file_name))-50mers.jf $(data_dir)/Bcalms/$(file_names[1])-30mers.bcalm.fa`);
-	Y50 = pmap(x->int(readall(`$(query_per_sequence_binary) $(basename(input_file_name))-50mers.jf $(data_dir)/Bcalms/$(file_names[x])-30mers.bcalm.fa`)),[1:num_files]);
-	y30 = Y30/float(split(readall(`$(jellyfish_binary) stats $(basename(input_file_name))-30mers.jf`))[6]); #divide by total number of kmers in sample
-	y50 = Y50/float(split(readall(`$(jellyfish_binary) stats $(basename(input_file_name))-50mers.jf`))[6]); #divide by total number of kmers in sample
+	Y50 = pmap(x->parse(Int,readall(`$(query_per_sequence_binary) $(basename(input_file_name))-50mers.jf $(data_dir)/Bcalms/$(file_names[x])-30mers.bcalm.fa`)),collect(1:num_files));
+        y30 = Y30/parse(Float64,split(readall(`$(jellyfish_binary) stats $(basename(input_file_name))-30mers.jf`))[6]); #divide by total number of kmers in sample
+	y50 = Y50/parse(Float64,split(readall(`$(jellyfish_binary) stats $(basename(input_file_name))-50mers.jf`))[6]); #divide by total number of kmers in sample
 	if save_y
 		fid = open("$(dirname(output_file))/$(basename(input_file_name))-y30.txt","w")
 		for i=1:length(y30)
@@ -466,7 +466,7 @@ end
 
 #Make the hypothetical matrices (later, only do this for the basis elements)
 #30mers
-A = float(h5read(A30_file,"/common_kmers"))'; #This was before I was transposing everything
+A = convert(Matrix{Float64},(h5read(A30_file,"/common_kmers"))'); #This was before I was transposing everything
 A_norm = A./diag(A)';
 
 #Create hypothetical organisms
@@ -482,7 +482,7 @@ end
 # real plus hypothetical
 A_with_hypothetical30 = hcat(A_norm, hypothetical_matrix);
 #50mers
-A = float(h5read(A50_file,"/common_kmers"))'; 
+A = convert(Matrix{Float64},h5read(A50_file,"/common_kmers"))'; 
 A_norm = A./diag(A)';
 #Create hypothetical organisms
 thresholds=thresholds.^1.5;
@@ -510,17 +510,17 @@ if basis==[]
 	rm("$(basename(input_file_name))-50mers.jf")
 	error("No organisms detected. Most likely the input file doesn't have enough sequences")
 end
-y = float(vcat(y30[basis],y50[basis]));
-column_basis=int64(vcat(basis,[basis[j].+i*num_files for i=1:length(thresholds), j=1:length(basis)]'[:])); #this is the basis expanded to include the hypothetical organisms
+y = convert(Vector{Float64},vcat(y30[basis],y50[basis]));
+column_basis=vcat(basis,Int[basis[j].+i*num_files for i=1:length(thresholds), j=1:length(basis)]'[:]); #this is the basis expanded to include the hypothetical organisms
 xtemp=lsqnonneg(A_with_hypothetical[vcat(basis,basis.+num_files),column_basis],y,.000005,3,.000001); #Added change in x term
-resid30=norm(A_with_hypothetical30[basis,column_basis]*xtemp-float(y30[basis]),2);
-resid50=norm(A_with_hypothetical50[basis,column_basis]*xtemp-float(y50[basis]),2);
+resid30=norm(A_with_hypothetical30[basis,column_basis]*xtemp-convert(Vector{Float64},y30[basis]),2);
+resid50=norm(A_with_hypothetical50[basis,column_basis]*xtemp-convert(Vector{Float64},y50[basis]),2);
 lambda50=resid50/resid30;
 lambda30=resid30/resid50;
 if lambda50>1
-	xtemp=lsqnonneg(vcat(A_with_hypothetical30[basis,column_basis], lambda50*A_with_hypothetical50[basis,column_basis]),float(vcat(y30[basis],lambda50*y50[basis])),.000005,3,.000001);
+	xtemp=lsqnonneg(vcat(A_with_hypothetical30[basis,column_basis], lambda50*A_with_hypothetical50[basis,column_basis]),convert(Vector{Float64},vcat(y30[basis],lambda50*y50[basis])),.000005,3,.000001);
 elseif lambda30>1
-	xtemp=lsqnonneg(vcat(lambda30*A_with_hypothetical30[basis,column_basis], A_with_hypothetical50[basis,column_basis]),float(vcat(lambda30*y30[basis],y50[basis])),.000005,3,.000001);
+	xtemp=lsqnonneg(vcat(lambda30*A_with_hypothetical30[basis,column_basis], A_with_hypothetical50[basis,column_basis]),convert(Vector{Float64},vcat(lambda30*y30[basis],y50[basis])),.000005,3,.000001);
 end
 
 
@@ -560,7 +560,7 @@ if isfile("$(basename(input_file_name))-50mers.jf")
 end
 
 #Convert to CAMI format, use 30mer matrix to do the LCA
-A = float(h5read(A30_file,"/common_kmers"))'; 
+A = convert(Matrix{Float64},h5read(A30_file,"/common_kmers"))'; 
 A_norm = A./diag(A)';
 
 if kind=="default" || kind=="specific" || kind=="sensitive"
